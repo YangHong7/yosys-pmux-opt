@@ -1,0 +1,21 @@
+# Identical script for the unmodified baseline and integrated optimized binary.
+# The only synthesis difference is the binary's built-in synth_intel flow.
+read_verilog -sv ../input/source.v
+synth_intel -family cycloneiv -run begin:map_ffram
+check -assert
+
+synth_intel -family cycloneiv -run map_ffram:map_cells
+
+# Formal reference after map_luts/ABC9, but before final Cyclone IV cell mapping.
+# This is the ILANG/RTLIL checkpoint used by EQY.
+check -assert
+write_rtlil formal.rtlil
+
+synth_intel -family cycloneiv -run map_cells:
+check -assert
+
+stat
+tee -o stat.json stat -json
+write_json netlist.json
+
+# Windows resources are measured externally by the runner.

@@ -1,0 +1,13 @@
+{
+  "applied_at": "2026-10-23T11:37:01.6541865+08:00",
+  "target": "oss-cad-suite/bin/yosys.exe",
+  "backup": "oss-cad-suite/bin/yosys.exe.stack2m-original",
+  "previous_reserve_bytes": 2097152,
+  "new_reserve_bytes": 134217728,
+  "stack_commit_bytes": 4096,
+  "checksum": 36359148,
+  "scope": "Verification only. Only PE stack reserve and checksum changed; code sections unchanged.",
+  "current_state": "restored_original_2MiB",
+  "restored_at": "2026-10-31T01:14:24.6492244+08:00",
+  "current_reserve_bytes": 2097152
+}

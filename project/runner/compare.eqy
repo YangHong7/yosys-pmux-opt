@@ -1,0 +1,43 @@
+[gold]
+read_rtlil baseline/formal.rtlil
+techmap -autoproc -map eqy/dffeas_unmap.v
+select -assert-none t:dffeas
+techmap t:$lut
+select -clear
+prep -auto-top -flatten
+delete =A:blackbox =A:whitebox
+hierarchy -check
+select -assert-mod-count 1 *
+clk2fflogic
+opt_clean
+rename -top top
+rename -hide
+
+[gate]
+read_rtlil optimized/formal.rtlil
+techmap -autoproc -map eqy/dffeas_unmap.v
+select -assert-none t:dffeas
+techmap t:$lut
+select -clear
+prep -auto-top -flatten
+delete =A:blackbox =A:whitebox
+hierarchy -check
+select -assert-mod-count 1 *
+clk2fflogic
+opt_clean
+rename -top top
+rename -hide
+
+# Hidden internal nets are not match/cut points. Group all top-level outputs;
+# bind prevents non-primary matched signals from becoming abstract inputs.
+[collect *]
+group *
+bind *
+
+[partition *]
+name whole *
+
+[strategy pdr]
+use sby
+engine abc pdr
+timeout 400

@@ -1,0 +1,47 @@
+{
+  "NAME": [
+    "bash"
+  ],
+  "VERSION": [
+    "5.3.20-2"
+  ],
+  "BASE": [
+    "bash"
+  ],
+  "DESC": [
+    "The GNU Bourne Again shell"
+  ],
+  "URL": [
+    "https://www.gnu.org/software/bash/bash.html"
+  ],
+  "ARCH": [
+    "x86_64"
+  ],
+  "BUILDDATE": [
+    "1791805497"
+  ],
+  "INSTALLDATE": [
+    "1792679552"
+  ],
+  "PACKAGER": [
+    "CI (https://github.com/msys2/msys2-autobuild/actions/runs/38244507837/job/114794940516)"
+  ],
+  "SIZE": [
+    "12830716"
+  ],
+  "REASON": [
+    "1"
+  ],
+  "LICENSE": [
+    "spdx:GPL-3.0-or-later"
+  ],
+  "VALIDATION": [
+    "pgp"
+  ],
+  "PROVIDES": [
+    "sh"
+  ],
+  "XDATA": [
+    "pkgtype=split"
+  ]
+}

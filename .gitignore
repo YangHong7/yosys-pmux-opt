@@ -1,0 +1,13 @@
+# 编译产物目录（解压后体积巨大；对应 build.rar 压缩包单独提交）
+build/
+
+# 验证工具链（体积大，按 README 自行下载）
+/oss-cad-suite/
+
+# 运行记录（每批产物体积较大，仅保留报告）
+/project/runs/
+
+# 系统与编辑器文件
+Thumbs.db
+Desktop.ini
+.DS_Store

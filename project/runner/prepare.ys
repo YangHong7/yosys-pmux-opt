@@ -1,0 +1,13 @@
+# The orchestrator runs this file from <case-run>/common.
+# A frozen copy of the selected case is available at ../input/source.v.
+
+read_verilog -sv ../input/source.v
+
+# Build the exact pre-mapping design seen by the integrated PMUX_OPT pass.
+# synth_intel uses hierarchy -auto-top when -top is omitted, so case files
+# are not required to name their top module "top".
+synth_intel -family cycloneiv -run begin:map_ffram
+check -assert
+
+stat
+tee -o stat.json stat -json

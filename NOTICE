@@ -1,0 +1,22 @@
+pmux-opt - 基于 Yosys 的 PMUX 结构优化设计
+Copyright (c) 2026 YangHong7
+
+本项目自研部分（pmux_opt Pass 及其接入文件，位于 project/src/）以 ISC
+许可证发布，见 LICENSE。
+
+本项目包含基于以下上游开源项目的源码与构建产物：
+
+- Yosys v0.69
+  https://github.com/YosysHQ/yosys
+  提交 9f75ca1f9834a39a863915b5dae0c7b1e33533bc
+  ISC License，Copyright (c) Yosys developers and contributors
+
+- ABC（Berkeley Logic Synthesis and Verification Group）
+  提交 a51bf4a7bb38ce06ea3a544b1463b40832213917
+  随 Yosys 作为子模块构建，遵循其各自许可证
+
+- OSS CAD Suite（运行验证工具，需自行下载，不随仓库分发）
+  https://github.com/YosysHQ/oss-cad-suite-build
+
+- runtime/ 内 MSYS2 运行时组件
+  遵循各自许可证，详见 runtime/licenses/ 目录下各组件的许可证说明。
