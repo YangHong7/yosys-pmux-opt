@@ -20,3 +20,7 @@ Copyright (c) 2026 YangHong7
 
 - runtime/ 内 MSYS2 运行时组件
   遵循各自许可证，详见 runtime/licenses/ 目录下各组件的许可证说明。
+
+- CPython 3.13.9 Windows x64 embeddable package（runtime/python/）
+  https://www.python.org/downloads/release/python-3139/
+  Python Software Foundation License，许可证见 runtime/python/LICENSE.txt。

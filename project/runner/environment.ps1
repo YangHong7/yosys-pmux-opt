@@ -28,24 +28,12 @@ $ucrtBin = Join-Path $msysRoot 'ucrt64\bin'
 $msysBin = Join-Path $msysRoot 'usr\bin'
 $nativeTcl = Join-Path $msysRoot 'ucrt64\lib\tcl8.6'
 foreach ($required in @(
-    (Join-Path $suiteRoot 'bin\eqy.exe'),
-    (Join-Path $suiteRoot 'bin\sby.exe'),
-    (Join-Path $suiteRoot 'bin\yosys.exe'),
-    (Join-Path $suiteRoot 'bin\yosys-abc.exe'),
-    (Join-Path $suiteRoot 'lib\python3.exe'),
-    (Join-Path $msysBin 'make.exe'),
-    (Join-Path $msysBin 'bash.exe'),
+    (Join-Path $engineeringRoot 'runtime\python\python.exe'),
     (Join-Path $ucrtBin 'libstdc++-6.dll'),
     (Join-Path $nativeTcl 'init.tcl'),
     (Join-Path $PSScriptRoot 'windows_measurement.dll')
 )) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
-        if ($required.StartsWith($suiteRoot, [StringComparison]::OrdinalIgnoreCase)) {
-            throw ("环境检查未通过：验证工具套件缺失或不完整。`n" +
-                   "  所需版本：OSS CAD Suite 20260830（Windows 64 位）`n" +
-                   "  放置位置：工程根目录下的 oss-cad-suite 文件夹`n" +
-                   "  配置方法：请参阅 README.md 中的快速运行 / 准备验证工具。")
-        }
         throw "环境检查未通过：运行依赖文件缺失，请检查交付目录是否完整。`n  缺失文件：$required"
     }
 }
@@ -80,5 +68,5 @@ $env:MAKEFLAGS = 'SHELL=/usr/bin/bash'
 $env:YOSYS = 'yosys'
 $env:ABC = 'yosys-abc'
 $env:PMUX_POWERSHELL = $windowsPowerShell
-$runnerPython = $env:PYTHON_EXECUTABLE
+$runnerPython = Join-Path $engineeringRoot 'runtime\python\python.exe'
 

@@ -90,10 +90,30 @@ class RunLogger:
             stream.write(f"{now_iso()} | {message}\n")
 
 
-def console_line(label: str, passed: bool, detail: str = "") -> None:
+def console_line(label: str, passed: bool | None, detail: str = "") -> None:
     width = sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in label)
     title = label + " " * max(1, 30 - width)
-    print(f"  {title}{'通过' if passed else '失败'}" + (f"  {detail}" if detail else ""), flush=True)
+    state = "未进行" if passed is None else "通过" if passed else "失败"
+    print(f"  {title}{state}" + (f"  {detail}" if detail else ""), flush=True)
+
+
+def proof_status(status: str) -> str:
+    return "未进行" if status == "NOT_RUN" else status
+
+
+def formal_tools_available() -> bool:
+    suite = Path(os.environ.get("OSS_CAD_SUITE", PMUX_ROOT / "oss-cad-suite")).resolve()
+    for tool in ("eqy", "sby", "yosys", "yosys-abc"):
+        actual = shutil.which(tool)
+        if actual is None or Path(actual).resolve() != (suite / "bin" / f"{tool}.exe").resolve():
+            return False
+    return (suite / "lib" / "python3.exe").is_file() and all(
+        shutil.which(tool) for tool in ("bash", "make"))
+
+
+def formal_tools_notice() -> None:
+    print("等价性验证未进行：验证工具套件缺失或不完整。", flush=True)
+    print("  请准备 OSS CAD Suite 20260830（Windows 64 位）；配置方法见根目录 README.md 的快速运行部分。", flush=True)
 
 
 def stage_title(label: str) -> str:
@@ -267,7 +287,7 @@ def run_yosys_branch(case_root: Path, branch: str, script: Path,
                       "measurement": str(measurement_file)}}
 
 
-def run_eqy(case_root: Path, logger: RunLogger) -> dict[str, Any]:
+def run_eqy(case_root: Path, logger: RunLogger, available: bool = True) -> dict[str, Any]:
     eqy_dir = case_root / "eqy"
     eqy_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(RUNNER_DIR / "dffeas_unmap.v", eqy_dir / "dffeas_unmap.v")
@@ -286,6 +306,14 @@ def run_eqy(case_root: Path, logger: RunLogger) -> dict[str, Any]:
         config_path.write_text(config, encoding="utf-8")
         work_dir = eqy_dir / name
         output_log = eqy_dir / f"{name}.log"
+        if not available:
+            output_log.write_text("未进行：验证工具套件缺失或不完整。请参阅根目录 README.md 准备验证工具。\n", encoding="utf-8")
+            console_line(stage_title(name), None, "配置方法见根目录 README.md")
+            logger.write(f"SKIP {case_root.name}:eqy:{name} | formal tools unavailable | log={output_log}")
+            results[name] = {"status": "NOT_RUN", "return_code": None, "passed": False,
+                             "global_partition_check": False, "whole_output_coverage": False,
+                             "partitions": [], "log": str(output_log)}
+            continue
         rc = run_command(["eqy", "-j", "1", "-d", work_dir.relative_to(case_root).as_posix(),
                           config_path.relative_to(case_root).as_posix()],
                          case_root, output_log, logger, f"{case_root.name}:eqy:{name}", quiet=True)
@@ -314,7 +342,7 @@ def run_eqy(case_root: Path, logger: RunLogger) -> dict[str, Any]:
                          "log": str(output_log)}
     passed = all(item["passed"] for item in results.values())
     return {
-        "status": "PASS" if passed else "FAIL",
+        "status": "NOT_RUN" if not available else "PASS" if passed else "FAIL",
         "passed": passed,
         "mode": "eqy_abc9_post_whole_design_pdr",
         "checks": results,
@@ -405,7 +433,8 @@ def apply_measurement_review(case_root: Path, baseline_run: dict[str, Any],
     return result
 
 
-def run_case(case_file: Path, run_root: Path, logger: RunLogger, warmup: dict[str, Any]) -> dict[str, Any]:
+def run_case(case_file: Path, run_root: Path, logger: RunLogger, warmup: dict[str, Any],
+             formal_available: bool = True) -> dict[str, Any]:
     case_name = case_file.stem
     case_root = run_root / "cases" / case_name
     input_dir = case_root / "input"
@@ -486,13 +515,17 @@ def run_case(case_file: Path, run_root: Path, logger: RunLogger, warmup: dict[st
         "dff_delta": int(optimized_cells["dff"]) - int(baseline_cells["dff"]),
         "dff_nonincrease": int(optimized_cells["dff"]) <= int(baseline_cells["dff"]),
     }
-    result["eqy"] = run_eqy(case_root, logger)
+    result["eqy"] = run_eqy(case_root, logger, formal_available)
     other_nonincrease = all(optimized_cells["by_type"].get(kind, 0) <= baseline_cells["by_type"].get(kind, 0)
                            for kind in set(baseline_cells["by_type"]) | set(optimized_cells["by_type"])
                            if kind not in LOGIC_CELL_TYPES and kind != DFF_CELL_TYPE)
     result["cell_reduction"]["other_cells_nonincrease"] = other_nonincrease
-    result["status"] = "PASS" if (result["eqy"]["passed"]
-        and other_nonincrease and reduction_cells >= 0) else "VALIDATION_FAIL"
+    if not other_nonincrease or reduction_cells < 0:
+        result["status"] = "VALIDATION_FAIL"
+    elif not formal_available:
+        result["status"] = "NOT_VERIFIED"
+    else:
+        result["status"] = "PASS" if result["eqy"]["passed"] else "VALIDATION_FAIL"
     write_json(case_root / "result.json", result)
     return result
 
@@ -512,19 +545,20 @@ def build_summary(run_id: str, mode: str, results: list[dict[str, Any]], manifes
         return [r[branch]["metrics"][field] for r in complete if r[branch]["metrics"].get(field) is not None]
     def efficiency_values(field: str) -> list[float]:
         return [r["efficiency"][field] for r in results if r.get("efficiency", {}).get(field) is not None]
-    failed = [r["case"] for r in results if r.get("status") != "PASS"]
+    failed = [r["case"] for r in results if r.get("status") not in ("PASS", "NOT_VERIFIED")]
     valid = bool(results) and not failed
+    verified = valid and all(r.get("eqy", {}).get("passed") for r in results)
     rates = [r["cell_reduction"]["percent"] for r in complete if r.get("cell_reduction", {}).get("percent") is not None]
     base_logic, opt_logic = total("baseline", "logic"), total("optimized", "logic")
     base_wall, opt_wall = values("baseline", "wall_seconds"), values("optimized", "wall_seconds")
     base_mem, opt_mem = values("baseline", "peak_memory_mb"), values("optimized", "peak_memory_mb")
     time_overheads, mem_overheads = efficiency_values("time_overhead_percent"), efficiency_values("memory_overhead_percent")
-    return {"run_id": run_id, "mode": mode, "status": "PASS" if valid else "FAIL",
+    return {"run_id": run_id, "mode": mode, "status": "PASS" if verified else "NOT_VERIFIED" if valid else "FAIL",
             "metric_version": METRIC_VERSION, "started_at": manifest["started_at"], "finished_at": now_iso(),
             "measurements_per_branch": "one initial; conditional five-review pairs", "case_count": len(results),
             "eqy_passed": sum(bool(r.get("eqy", {}).get("passed")) for r in results),
             "failed_cases": failed,
-            "eqy_failed_cases": [r["case"] for r in results if r.get("eqy") and not r["eqy"]["passed"]],
+            "eqy_failed_cases": [r["case"] for r in results if r.get("eqy") and r["eqy"]["status"] != "NOT_RUN" and not r["eqy"]["passed"]],
             "baseline_cells_total": total("baseline", "total"), "optimized_cells_total": total("optimized", "total"),
             "baseline_logic_cells_total": base_logic, "optimized_logic_cells_total": opt_logic,
             "baseline_lut_total": total("baseline", "lut"), "optimized_lut_total": total("optimized", "lut"),
@@ -534,7 +568,7 @@ def build_summary(run_id: str, mode: str, results: list[dict[str, Any]], manifes
             "weighted_reduction_percent": 100.0 * (base_logic - opt_logic) / base_logic if base_logic else None,
             "dff_nonincrease_all": valid and all(r["cell_reduction"]["dff_nonincrease"] for r in results),
             "other_cells_nonincrease_all": valid and all(r["cell_reduction"]["other_cells_nonincrease"] for r in results),
-            "optimization_valid": valid,
+            "optimization_valid": verified,
             "baseline_wall_seconds_sum": sum(base_wall) if base_wall else None,
             "optimized_wall_seconds_sum": sum(opt_wall) if opt_wall else None,
             "optimized_wall_seconds_max": max(opt_wall) if opt_wall else None,
@@ -608,7 +642,7 @@ def terminal_case_tables(results: list[dict[str, Any]]) -> list[str]:
             count(result.get("prepare", {}).get("input_cells")),
             pair(base, opt, "lut"), pair(base, opt, "not"), pair(base, opt, "logic"), pair(base, opt, "dff"),
             fmt_number(result.get("cell_reduction", {}).get("percent"), 2, "%"),
-            result.get("eqy", {}).get("status", "N/A"),
+            proof_status(result.get("eqy", {}).get("status", "N/A")),
         ])
         bm = result.get("baseline", {}).get("metrics") or {}
         om = result.get("optimized", {}).get("metrics") or {}
@@ -633,11 +667,13 @@ def terminal_case_tables(results: list[dict[str, Any]]) -> list[str]:
 
 def render_report(summary: dict[str, Any], manifest: dict[str, Any], run_root: Path) -> str:
     efficiency = "PASS" if summary["efficiency_full_score_conditions_met"] else "FAIL"
+    skipped = sum(r.get("eqy", {}).get("status") == "NOT_RUN" for r in summary["results"])
+    equivalence = f"未进行 {skipped} 例；通过 {summary['eqy_passed']}/{summary['case_count']}" if skipped else f"{summary['eqy_passed']}/{summary['case_count']}"
     lines = [
         "# PMUX 优化结果", "",
         "时间为 PowerShell Measure-Command 墙钟时间，内存为 Yosys 主进程峰值内存占用。整批正式测量前，所选案例各用原版预热一次，之后不再逐例预热；小于1秒且时间首测开销超过5%时追加5组复核，以两版各自均值计算时间开销。内存保守采用最坏配对峰值样本，全部记录保留。", "",
         f"平均优化率：**{fmt_number(summary['average_reduction_percent'], 2, '%')}**；"
-        f"等价通过：**{summary['eqy_passed']}/{summary['case_count']}**；"
+        f"等价通过：**{equivalence}**；"
         f"本地效率阈值检查：**{efficiency}**。",
         "", "## 面积与等价", "",
         "|案例|状态|LUT 原→优|独立NOT 原→优|LUT+NOT 原→优|优化率|FF 原→优|EQY|",
@@ -652,8 +688,10 @@ def render_report(summary: dict[str, Any], manifest: dict[str, Any], run_root: P
             f"{base.get('logic', 'N/A')}→{opt.get('logic', 'N/A')}|"
             f"{fmt_number(result.get('cell_reduction', {}).get('percent'), 2, '%')}|"
             f"{base.get('dff', 'N/A')}→{opt.get('dff', 'N/A')}|"
-            f"{result.get('eqy', {}).get('status', 'NOT_RUN')}|"
+            f"{proof_status(result.get('eqy', {}).get('status', 'NOT_RUN'))}|"
         )
+    if skipped:
+        lines += ["", "等价性验证未进行：验证工具套件缺失或不完整。请参阅工程根目录 README.md 的快速运行部分准备验证工具。"]
     lines += ["", "## 时间与内存", ""] + efficiency_table(summary["results"])
     lines += ["", "## 时间复核", "", "|案例|是否触发|已完成组数|时间取值|", "|---|---|---:|---|"]
     for item in summary["results"]:
@@ -662,7 +700,7 @@ def render_report(summary: dict[str, Any], manifest: dict[str, Any], run_root: P
         lines.append(f"|{item['case']}|{'是' if triggered else '否'}|{len(protocol.get('review_pairs', []))}|{'5组各自均值' if triggered else '首测'}|")
     failures = []
     for result in summary["results"]:
-        if result["status"] != "PASS":
+        if result["status"] not in ("PASS", "NOT_VERIFIED"):
             reason = result.get("error") or result["status"]
             failures.append(f"- {result['case']}：{reason}。日志目录：{run_root / 'cases' / result['case']}")
             for name, proof in result.get("eqy", {}).get("checks", {}).items():
@@ -734,13 +772,10 @@ def main() -> int:
         print("ERROR: required build artifact missing:\n  " + "\n  ".join(missing), file=sys.stderr)
         return 2
 
-    suite = Path(os.environ.get("OSS_CAD_SUITE", PMUX_ROOT / "oss-cad-suite")).resolve()
-    for tool in ("eqy", "sby", "yosys", "yosys-abc"):
-        actual = shutil.which(tool)
-        expected = suite / "bin" / f"{tool}.exe"
-        if actual is None or Path(actual).resolve() != expected.resolve():
-            print(f"ERROR: formal tool must come from the configured suite: {tool}; use run_all.ps1 or run_case.ps1", file=sys.stderr)
-            return 2
+    formal_available = formal_tools_available()
+    if not formal_available:
+        formal_tools_notice()
+        print("继续执行综合与效率测量，等价性结果将标记为未进行。", flush=True)
     if not os.environ.get("PMUX_SYNTH_RUNTIME_PATH"):
         print("ERROR: synthesis runtime environment missing; use the PowerShell entry scripts", file=sys.stderr)
         return 2
@@ -755,10 +790,6 @@ def main() -> int:
 
     if not SYNTHESIS_SCRIPT.is_file():
         print("ERROR: shared synthesis script missing: synthesis.ys", file=sys.stderr)
-        return 2
-    missing_tools = [tool for tool in ("eqy", "sby", "yosys", "yosys-abc", "bash", "make") if not shutil.which(tool)]
-    if missing_tools:
-        print("ERROR: missing formal tools: " + ", ".join(missing_tools), file=sys.stderr)
         return 2
     for binary in (BASE_YOSYS, OPT_YOSYS, BASE_YOSYS.with_name("yosys-abc.exe"), OPT_YOSYS.with_name("yosys-abc.exe")):
         if not binary.is_file():
@@ -775,7 +806,8 @@ def main() -> int:
         print("Version: Yosys 0.69 (both branches); runtime check only, no compiler required")
         print(f"Cases: {len(discover_cases(args.cases_dir))}")
         print(f"Results: {portable_record(str(RESULT_ROOT))}")
-        print("CHECK PASS: binaries, formal tools and shared synthesis script are available")
+        print("CHECK PASS: binaries and shared synthesis script are available")
+        print("等价性验证工具：" + ("已就绪" if formal_available else "未就绪，可运行综合与效率测量"))
         return 0
 
     try:
@@ -806,13 +838,13 @@ def main() -> int:
             "python_version": platform.python_version(),
             "baseline_yosys": baseline_version,
             "optimized_yosys": optimized_version,
-            "eqy": capture_version(["eqy", "--version"]),
-            "formal_yosys": capture_version(["yosys", "-V"]),
+            "eqy": capture_version(["eqy", "--version"]) if formal_available else "NOT_RUN",
+            "formal_yosys": capture_version(["yosys", "-V"]) if formal_available else "NOT_RUN",
             "formal_stack_patch": (
                 json.loads((RUNNER_DIR / "formal_stack_patch.json").read_text(encoding="utf-8-sig"))
                 if (RUNNER_DIR / "formal_stack_patch.json").is_file() else None
             ),
-            "sby": capture_version(["sby", "--version"]),
+            "sby": capture_version(["sby", "--version"]) if formal_available else "NOT_RUN",
             "kernel": platform.release(),
             "cpu": cpu_model(),
         },
@@ -873,7 +905,7 @@ def main() -> int:
     for case_index, case_file in enumerate(case_files, 1):
         print(f"\n[{case_index}/{len(case_files)}] {case_file.stem}", flush=True)
         try:
-            results.append(run_case(case_file, run_root, logger, warmups[case_file.stem]))
+            results.append(run_case(case_file, run_root, logger, warmups[case_file.stem], formal_available))
         except Exception as error:  # Preserve the batch and remaining cases.
             logger.write(f"UNEXPECTED CASE ERROR | case={case_file.stem} | {type(error).__name__}: {error}")
             results.append({"case": case_file.stem, "source": source_path(case_file), "status": "RUNNER_ERROR", "error": str(error)})
@@ -890,7 +922,11 @@ def main() -> int:
     print("=== PMUX validation summary ===")
     print(f"Mode:        {mode}")
     print(f"Status:      {summary['status']}")
-    print(f"EQY:         {summary['eqy_passed']}/{summary['case_count']} PASS")
+    skipped = sum(r.get("eqy", {}).get("status") == "NOT_RUN" for r in results)
+    if skipped:
+        print(f"EQY:         未进行 {skipped} 例；通过 {summary['eqy_passed']}/{summary['case_count']}")
+    else:
+        print(f"EQY:         {summary['eqy_passed']}/{summary['case_count']} PASS")
     print(f"Logic cells: {summary['baseline_logic_cells_total']} -> {summary['optimized_logic_cells_total']}")
     print(f"Avg rate:    {fmt_number(summary['average_reduction_percent'], 2, '%')}")
     print(f"DFF:         {summary['baseline_dff_total']} -> {summary['optimized_dff_total']}")
@@ -913,7 +949,9 @@ def main() -> int:
         print(f"Failed:      {', '.join(summary['failed_cases'])}")
     print(f"Report:      {portable_record(str(report_path))}")
     print(f"Run files:   {portable_record(str(run_root))}")
-    return 0 if summary["status"] == "PASS" else 1
+    if skipped:
+        formal_tools_notice()
+    return 0 if summary["status"] in ("PASS", "NOT_VERIFIED") else 1
 
 
 if __name__ == "__main__":

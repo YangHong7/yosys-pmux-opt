@@ -55,13 +55,13 @@
 
 ## 快速运行
 
-### 1. 准备验证工具
+### 1. 运行环境与验证工具
 
-运行环境为 **Windows 10/11 x64**。受提交材料大小限制，OSS CAD Suite 需单独下载：
+运行环境为 **Windows 10/11 x64**。Python 和综合运行依赖已包含在 `runtime/`，解压完整运行包后即可测量优化率、时间和内存。等价性验证使用以下工具套件，需单独下载：
 
 [Windows x64 OSS CAD Suite 20260830 下载页面](https://github.com/YosysHQ/oss-cad-suite-build/releases/tag/2026-08-30)
 
-解压后将 `oss-cad-suite` 文件夹放在工程根目录，与 `run.cmd` 同级，确保存在 `oss-cad-suite/bin/eqy.exe`。运行脚本使用该套件内的 Python，其他运行依赖已整理在 `runtime/` 中。
+解压后将 `oss-cad-suite` 文件夹放在工程根目录，与 `run.cmd` 同级，确保存在 `oss-cad-suite/bin/eqy.exe`。套件完整时执行三组等价性验证；未准备好时显示提示并继续综合和效率测量，各案例与汇总表的等价性标记为“未进行”。
 
 验证套件已安装在其他位置时，可将 `project/runner/environment.ps1` 中的 `$suiteRoot` 改为该套件目录的绝对路径，例如 `$suiteRoot = 'D:\Tools\oss-cad-suite'`。
 
@@ -76,7 +76,7 @@
 .\run.cmd --help           # 查看参数
 ```
 
-也可直接双击 `run.cmd` 运行全部九例。入口依次完成预热、两版综合与指标采集、必要的时间复核、三组等价性证明及结果汇总。
+也可直接双击 `run.cmd` 运行全部九例。入口依次完成预热、两版综合与指标采集、必要的时间复核、可用时的三组等价性证明及结果汇总。
 
 补充案例单独运行：
 
@@ -101,7 +101,7 @@ pmux/
 ├─ run.cmd                    Windows 统一测试入口
 ├─ yosys-v0.69-base/build/     基线版完整构建产物
 ├─ yosys-v0.69-opt/build/      优化版完整构建产物
-├─ runtime/                   运行依赖
+├─ runtime/                   便携 Python 与综合运行依赖
 ├─ oss-cad-suite/              自行准备的验证工具
 └─ project/
    ├─ src/                    优化源码与接入文件
@@ -133,7 +133,7 @@ pmux/
 
 两版使用相同工具链、构建配置和 ABC 子模块版本。优化版增加 `pmux_opt`、Intel 流程接入及 ABC9 默认命令流修改，ABC 算法源码保持原版。
 
-运行验证使用 OSS CAD Suite 内的 Python、EQY、SBY 和证明工具；构建用 Python 负责构建阶段的代码生成，两者分别由对应脚本配置。
+测试入口使用 `runtime/python/` 中的便携 Python 3.13.9；等价性证明使用 OSS CAD Suite 内的 Python、EQY、SBY 和证明工具。构建用 Python 负责构建阶段的代码生成，由 CMake 配置。
 
 ## 从源码重新编译
 
