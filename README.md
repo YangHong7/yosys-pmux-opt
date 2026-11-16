@@ -24,14 +24,14 @@
 | test2 | 25 | 15 | 40.00% | 0→0 | 2→2 |
 | test3 | 13 | 8 | 38.46% | 17→14 | 3→3 |
 | test4 | 36 | 26 | 27.78% | 10→10 | 3→2 |
-| balanced | 426 | 366 | 14.08% | 12→12 | 10→9 |
-| pipeline | 450 | 348 | 22.67% | 24→24 | 4→6 |
-| crossbar | 408 | 361 | 11.52% | 10→10 | 6→7 |
+| balanced | 426 | 365 | 14.32% | 12→12 | 10→9 |
+| pipeline | 450 | 336 | 25.33% | 24→24 | 4→5 |
+| crossbar | 408 | 346 | 15.20% | 10→10 | 6→7 |
 | feedback | 368 | 299 | 18.75% | 16→16 | 7→7 |
-| nested | 413 | 378 | 8.47% | 12→12 | 10→10 |
+| nested | 413 | 371 | 10.17% | 12→12 | 10→10 |
 
-- 九例逐例平均削减率为 **24.21%**，组合逻辑合计 **2427→1985**，DFF 合计 **323→320**。
-- 原始 RTL 与基线网表、原始 RTL 与优化网表、基线与优化网表三组等价性比较，共 **27 项全部通过**。
+- 九例逐例平均削减率为 **25.12%**，组合逻辑合计 **2427→1950**，DFF 合计 **323→320**。
+- 原始 RTL 与基线网表、原始 RTL 与优化网表、基线与优化网表三组等价性比较，每轮 27 项，**十轮共 270 项全部通过**。
 
 ### 十轮效率测试
 
@@ -39,19 +39,19 @@
 
 | 案例 | 时间参考均值 | 时间十轮范围 | 内存参考均值 | 内存十轮范围 | 两项均 ≤5% 轮数 |
 |---|---:|---:|---:|---:|---:|
-| test1 | −11.69% | −23.89%～−8.08% | −3.94% | −5.34%～−3.21% | 10/10 |
-| test2 | −2.03% | −11.95%～+2.36% | +0.25% | −1.34%～+1.36% | 10/10 |
-| test3 | −0.35% | −5.74%～+3.23% | +0.07% | −0.49%～+0.56% | 10/10 |
-| test4 | −4.38% | −12.62%～+2.47% | −1.35% | −2.58%～+0.21% | 10/10 |
-| balanced | −8.81% | −18.21%～+2.61% | −4.90% | −7.65%～−2.96% | 10/10 |
-| pipeline | −13.75% | −18.48%～−10.94% | −1.26% | −1.86%～−0.49% | 10/10 |
-| crossbar | −1.96% | −6.38%～+2.52% | +5.12% | +4.23%～+6.42% | 5/10 |
-| feedback | −3.53% | −7.05%～+0.60% | −1.94% | −2.76%～−0.72% | 10/10 |
-| nested | −8.97% | −16.66%～−3.82% | −1.44% | −2.79%～+0.84% | 10/10 |
+| test1 | −7.90% | −15.77%～+2.12% | −3.58% | −5.09%～−2.68% | 10/10 |
+| test2 | −1.52% | −9.14%～+4.03% | +0.59% | −0.76%～+1.70% | 10/10 |
+| test3 | −4.63% | −11.18%～+2.38% | +0.87% | +0.33%～+1.80% | 10/10 |
+| test4 | −6.79% | −16.22%～+2.31% | −0.43% | −1.50%～+0.59% | 10/10 |
+| balanced | −10.00% | −23.34%～−1.54% | −3.22% | −3.97%～−2.11% | 10/10 |
+| pipeline | −8.92% | −17.26%～+0.14% | −0.16% | −0.83%～+0.52% | 10/10 |
+| crossbar | −7.45% | −21.83%～+2.76% | +0.34% | −1.19%～+1.27% | 10/10 |
+| feedback | −3.92% | −14.04%～+2.43% | −1.72% | −3.70%～−0.03% | 10/10 |
+| nested | −5.58% | −13.11%～+1.56% | −1.36% | −3.16%～+0.72% | 10/10 |
 
-- 九例十轮时间开销均低于 5%，最高为 test3 的 **3.23%**；八例在十轮中时间与内存均达标。
-- crossbar 内存开销均值为 **+5.12%**，范围 **+4.23%～+6.42%**，仅高于 5% 阈值 0.12 个百分点，十轮中 5 轮两项同时达标。
-- 十轮的逐轮测量样本、时间复核记录、综合网表与等价性证明保存在 `project/runs/<批次>/`(由于runs具体产物包括预热、两版综合结果、效率统计、等价性验证以及可能的复核数据，体积较大，目录下仅保留十轮中最近一轮的结果)，批次汇总报告保存在 `project/reports/`，详细分析见设计报告第 3.4 节。
+- **10/10 轮**的九个案例均同时满足时间和内存开销 ≤5%。时间最高开销为 test2 的 **+4.03%**，内存最高开销为 test3 的 **+1.80%**。
+- crossbar 内存开销均值为 **+0.34%**，范围 **−1.19%～+1.27%**，两项同时达标 **10/10**。
+- 逐轮汇总见 [project/reports/](project/reports/)，reports下压缩包是此前历史10轮测试记录，原始测量、网表和等价性记录由于大小限制未上传。
 
 ## 快速运行
 
@@ -66,6 +66,16 @@
 验证套件已安装在其他位置时，可将 `project/runner/environment.ps1` 中的 `$suiteRoot` 改为该套件目录的绝对路径，例如 `$suiteRoot = 'D:\Tools\oss-cad-suite'`。
 
 ### 2. 检查环境并执行测试
+
+Git 仓库中的两份 build.rar 直接包含构建产物。分别在各版本目录中用 WinRAR 选择“解压到 build\”，或在工程根目录运行：
+
+```powershell
+New-Item -ItemType Directory -Force .\yosys-v0.69-base\build, .\yosys-v0.69-opt\build | Out-Null
+tar -xf .\yosys-v0.69-base\build.rar -C .\yosys-v0.69-base\build
+tar -xf .\yosys-v0.69-opt\build.rar -C .\yosys-v0.69-opt\build
+```
+
+解压后确认两版的 yosys.exe 都直接位于各自的 build 目录下。
 
 在工程根目录打开 PowerShell：
 
@@ -242,7 +252,7 @@ Copy-Item .\project\src\abc9.cc .\yosys-v0.69-opt\passes\techmap\abc9.cc -Force
 ```powershell
 Set-Location .\yosys-v0.69-base
 
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$ucrtBin/gcc.exe" "-DCMAKE_CXX_COMPILER=$ucrtBin/g++.exe" "-DCMAKE_PREFIX_PATH=$ucrtRoot" "-DPython_EXECUTABLE=$ucrtBin/python.exe" "-DPython3_EXECUTABLE=$ucrtBin/python.exe"
+cmake --fresh -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$ucrtBin/gcc.exe" "-DCMAKE_CXX_COMPILER=$ucrtBin/g++.exe" "-DCMAKE_PREFIX_PATH=$ucrtRoot" "-DPython_EXECUTABLE=$ucrtBin/python.exe" "-DPython3_EXECUTABLE=$ucrtBin/python.exe"
 
 cmake --build build --parallel 4
 ```
@@ -254,7 +264,7 @@ base 编译完成后，进入同级的 opt 目录，采用相同参数：
 ```powershell
 Set-Location ..\yosys-v0.69-opt
 
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$ucrtBin/gcc.exe" "-DCMAKE_CXX_COMPILER=$ucrtBin/g++.exe" "-DCMAKE_PREFIX_PATH=$ucrtRoot" "-DPython_EXECUTABLE=$ucrtBin/python.exe" "-DPython3_EXECUTABLE=$ucrtBin/python.exe"
+cmake --fresh -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$ucrtBin/gcc.exe" "-DCMAKE_CXX_COMPILER=$ucrtBin/g++.exe" "-DCMAKE_PREFIX_PATH=$ucrtRoot" "-DPython_EXECUTABLE=$ucrtBin/python.exe" "-DPython3_EXECUTABLE=$ucrtBin/python.exe"
 
 cmake --build build --parallel 4
 ```

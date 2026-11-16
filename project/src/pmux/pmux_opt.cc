@@ -3,6 +3,7 @@
 优化目标：针对pmux有关典型结构的优化
 设计队伍：玛莎的苹果汁好喝对不队
 设计与优化时间：26/9/20-26/10/31
+v2（26/11/12）: 对P5进行微调，进一步提高了优化效果，效率也有一定优化
  */
 
 #include "kernel/yosys.h"
@@ -50,7 +51,7 @@ struct PmuxCompleteDecoderRegion
         }
     };
     static int run(Design *design, bool verbose) {
-        const bool dag = true, force = false, reverse = false;
+        const bool dag = true, force = false;
         int ntree=0,ndag=0,skipped=0;
         for(auto m:design->selected_modules()) {
             SigMap sm(m);dict<SigBit,Dec> dec;pool<SigBit> ambiguous;
@@ -74,6 +75,8 @@ struct PmuxCompleteDecoderRegion
                 for(int v=0;v<=n;v++)if(!used.count(v))q.missing=v;
                 choices.emplace(c,q);ordered.push_back(c);
             }
+            if (ordered.empty())
+                continue;
             dict<SigSpec,Cell*> byoutput;dict<SigBit,Cell*> driver;dict<Cell*,pool<Cell*>> users;dict<Cell*,pool<Cell*>> parents;
             
             dict<Cell*,Cell*> uf;
@@ -119,7 +122,17 @@ struct PmuxCompleteDecoderRegion
                 remove_later.push_back(root);ndag++;
                 if (verbose) log("P5 region DAG nodes=%d leaves=%d control=%d estimate=%d->%d.\n",GetSize(cone),n,plan.gates(),treecost*width,flatcost);
             }
-            for(auto c:ordered){if(consumed.count(c)||bad.count(find(c)))continue;auto&q=choices.at(c);std::vector<int> order;for(int b=0;b<GetSize(q.address);b++)order.push_back(b);if(reverse)std::reverse(order.begin(),order.end());
+            for (auto c : ordered) {
+                if (consumed.count(c) || bad.count(find(c)))
+                    continue;
+                auto &q = choices.at(c);
+                std::vector<int> order;
+                for (int bit = 0; bit < GetSize(q.address); ++bit)
+                    order.push_back(bit);
+                // Use the opposite split order at region outputs and for narrow
+                // 4-way data selectors, where it gives ABC9 better LUT4 cuts.
+                if (parents[c].empty() || (GetSize(q.address) == 2 && q.width <= 5))
+                    std::reverse(order.begin(), order.end());
                 std::function<SigSpec(int,int)> emit=[&](int level,int code)->SigSpec{if(level==GetSize(order))return q.leaves[code];int b=order[level];SigSpec lo=emit(level+1,code),hi=emit(level+1,code|(1<<b));if(sm(lo)==sm(hi))return lo;Wire*y=m->addWire(NEW_ID,q.width);m->addMux(NEW_ID,lo,hi,q.address[b],y,c->get_src_attribute());return y;};
                 SigSpec y=emit(0,0);m->connect(c->getPort(ID::Y),y);remove_later.push_back(c);ntree++;
             }
@@ -174,11 +187,13 @@ struct PmuxOptPass : public Pass
 		log("\n");
 	}
 
+	//P1入口，针对成对共享结构的优化
 	static int run_group_rule(RTLIL::Design *design, bool verbose)
 	{
 		int changes = 0;
 
 		for (auto module : design->selected_modules()) {
+			//收集网表中的pmux结构，压到向量容器pmuxes中
 			SigMap sigmap(module);
 			std::vector<RTLIL::Cell *> pmuxes;
 			for (auto cell : module->selected_cells())
@@ -186,8 +201,12 @@ struct PmuxOptPass : public Pass
 					pmuxes.push_back(cell);
 			pool<RTLIL::Cell *> used;
 
+			//从单个pmux出发，在其余pmux里找到最适配的共享pmux，符合要求则进行改写，并标记为used
 			for (int first = 0; first < GetSize(pmuxes); first++) {
 				RTLIL::Cell *cell_a = pmuxes[first];
+
+				//改写过则不做处理；数据长度必须有效（大于0）
+				//独热选择信号必须大于6位（选择位够多操作才能尽量带来正收益），且是偶数（方便后面的匹配以及局部交换，尽量不保留残余pmux结构）
 				if (used.count(cell_a))
 					continue;
 				int width = cell_a->getParam(ID::WIDTH).as_int();
@@ -202,11 +221,15 @@ struct PmuxOptPass : public Pass
 
 				for (int second = first + 1; second < GetSize(pmuxes); second++) {
 					RTLIL::Cell *cell_b = pmuxes[second];
+
+					//候选pmux要和原pmux 选择信号完全相同，数据位宽保持一致
 					if (used.count(cell_b) || cell_b->getParam(ID::WIDTH).as_int() != width ||
 						cell_b->getParam(ID::S_WIDTH).as_int() != s_width ||
 						sigmap(cell_b->getPort(ID::S)) != a_s)
 						continue;
 
+					//寻找配对数据，这里只考虑最朴素的选项：相邻通道的交换（偶数和下一个奇数通道），符合代码习惯的同时，避免全局搜索带来的不可预测的复杂度和成本
+					//也方便后面交换mux的设计
 					RTLIL::SigSpec b_b = cell_b->getPort(ID::B);
 					std::vector<int> pairs;
 					for (int lane = 0; lane + 1 < s_width; lane += 2) {
@@ -217,22 +240,31 @@ struct PmuxOptPass : public Pass
 						if (a0 == b1 && a1 == b0 && a0 != a1)
 							pairs.push_back(lane);
 					}
+
+					//更新最优配对
 					if (GetSize(pairs) > GetSize(best_pairs)) {
 						best_b = cell_b;
 						best_pairs.swap(pairs);
 					}
 				}
 
+				//收益评估，至少得有三对共享才执行改写
+				//不然大数据位宽pmux带来的收益可能盖不住交换pmux等辅助结构的开销
 				if (best_b == nullptr || GetSize(best_pairs) < 3)
 					continue;
 
-
+				//匿名函数 1 安全性检查
+				//引用捕获，直接对外部变量修改
                 auto independent_data_cones = [&]() {
                     CellTypes ct(design);
                     pool<RTLIL::SigBit> roots, visited;
+
+					//收集两片pmux的输出bit位
                     for (auto c : {cell_a, best_b})
                         for (auto bit : sigmap(c->getPort(ID::Y)))
                             roots.insert(bit);
+
+					//建立驱动索引
                     dict<RTLIL::SigBit, pool<RTLIL::Cell *>> drivers;
                     for (auto c : module->cells())
                         for (auto &port : c->connections())
@@ -240,35 +272,58 @@ struct PmuxOptPass : public Pass
                                 for (auto bit : sigmap(port.second))
                                     if (bit.wire != nullptr)
                                         drivers[bit].insert(c);
+
+					//收集两片pmux的A、B、S端口所有信号，准备后面回溯
                     std::vector<RTLIL::SigBit> pending;
                     for (auto c : {cell_a, best_b})
                         for (auto p : {ID::A, ID::B, ID::S})
                             for (auto bit : sigmap(c->getPort(p)))
                                 pending.push_back(bit);
+
+					//循环每次只检查pending里面一个输入有关信号的驱动，存在安全问题则匿名函数直接返回false不进行优化
+					//每次循环之后将该信号的驱动加入pending，逐级追溯，直至上游信号都满足安全条件（都来自模块输入/常量/触发器后）
                     while (!pending.empty()) {
+
                         auto bit = pending.back();
                         pending.pop_back();
+						//如果信号来自两片pmux的输出返回false，避免重组之后出现逻辑组合环
+						//因为直接重组会先将两片pmux的配对输入拼接在一次，如果pmux是前后级联的关系就会出现A->B->A的逻辑环
                         if (roots.count(bit))
                             return false;
+
+						//常量或者以及遍历过安全跳过
                         if (bit.wire == nullptr || !visited.insert(bit).second)
                             continue;
+
+						//没有驱动单元，说明是模块的顶层输入端口，停止向上追溯
                         auto it = drivers.find(bit);
                         if (it == drivers.end())
                             continue;
+
+						//遇到触发器，安全跳过
+						//遇到未知或无法做常数求值的单元放弃优化
+						//
                         for (auto c : it->second) {
                             if (RTLIL::builtin_ff_cell_types().count(c->type))
                                 continue;
 
                             if (!ct.cell_known(c->type) || !ct.cell_evaluable(c->type))
                                 return false;
+
+							//第一级检查如果是正常组合逻辑，将驱动都压到pending后，后续循环继续对它们追溯
                             for (auto &port : c->connections())
                                 if (ct.cell_input(c->type, port.first))
                                     for (auto inbit : sigmap(port.second))
                                         pending.push_back(inbit);
                         }
                     }
+					//所有输入信号以及上游信号来源都安全，没有提前return false 则返回true
                     return true;
                 };
+
+				//两种情况：一种全部成对或者independent_data_cones为真，则全部配对，用来的两个pmux丢弃
+				//一种未全部配对并且其余通道合并有风险，则用来的两个pmux会保留残余结构
+				//参考后面的匿名函数rebuild_pmux
                 std::vector<int> group_pairs = best_pairs;
                 if (GetSize(best_pairs) < s_width / 2 && independent_data_cones()) {
                     group_pairs.clear();
@@ -276,13 +331,16 @@ struct PmuxOptPass : public Pass
                         group_pairs.push_back(lane);
                 }
 
+				//raw_s pmux的共享选择信号；a_b\b_b pmux的输入数据
 				RTLIL::SigSpec raw_s = cell_a->getPort(ID::S);
 				RTLIL::SigSpec b_b = best_b->getPort(ID::B);
 				RTLIL::SigSpec group_s, combined_b, swap_s;
 				std::vector<bool> matched(s_width, false);
 				std::string src = cell_a->get_src_attribute();
 
-				//一对内两个状态的数据不同时，在共享结构内部用 2 选 1 区分（部分交换）
+				//匿名函数2 完成重组大pmux的输入数据准备
+				//一对内两个状态的数据不同时，在共享结构内部用2选1mux实现部分交换
+				//数据相同时直通
 				auto pick = [&](const RTLIL::SigSpec &stay, const RTLIL::SigSpec &swap, RTLIL::SigBit sel) -> RTLIL::SigSpec {
 					if (sigmap(stay) == sigmap(swap))
 						return stay;
@@ -293,34 +351,49 @@ struct PmuxOptPass : public Pass
 
 				int partial = 0;
 				for (int lane : group_pairs) {
+					//group_s 重建pmux的选择信号，由原pmux相邻选择信号或得
 					matched[lane] = matched[lane + 1] = true;
 					RTLIL::Wire *group_bit = module->addWire(NEW_ID, 1);
 					module->addOr(NEW_ID, raw_s[lane], raw_s[lane + 1], group_bit, false, src);
 					group_s.append(group_bit);
+
+					//把奇通道lane标号压入swap_s
 					swap_s.append(raw_s[lane + 1]);
 
 					RTLIL::SigSpec a0 = a_b.extract(lane * width, width), a1 = a_b.extract((lane + 1) * width, width);
 					RTLIL::SigSpec b0 = b_b.extract(lane * width, width), b1 = b_b.extract((lane + 1) * width, width);
 					if (sigmap(a0) != sigmap(b1) || sigmap(b0) != sigmap(a1))
 						partial++;
+
+					//把相邻通道数据先后压入combined_b,作为大pmux的一组数据
 					combined_b.append(pick(a0, b1, raw_s[lane + 1]));
 					combined_b.append(pick(b0, a1, raw_s[lane + 1]));
 				}
 
 				RTLIL::Wire *pair_raw = module->addWire(NEW_ID, 2 * width);
+
+				//共享pmux的建立
+				//数据A是默认值，常用不定态；数据B即为前面压入的未交换数据；独热选择为group_s；输出为pair_raw
 				module->addPmux(NEW_ID, RTLIL::Const(RTLIL::State::Sx, 2 * width), combined_b, group_s, pair_raw, src);
+
+
+				//构建交换mux
+				//准备交换信号（swap_s集体取或）
 				RTLIL::Wire *swap_active = module->addWire(NEW_ID, 1);
 				module->addReduceOr(NEW_ID, swap_s, swap_active, false, src);
-
+				//准备交换后的数据
 				RTLIL::SigSpec swapped;
 				swapped.append(RTLIL::SigSpec(pair_raw).extract(width, width));
 				swapped.append(RTLIL::SigSpec(pair_raw).extract(0, width));
+				//准备交换后最终输出
 				RTLIL::Wire *pair_final = module->addWire(NEW_ID, 2 * width);
+				//构建
 				module->addMux(NEW_ID, pair_raw, swapped, swap_active, pair_final, src);
 
 				RTLIL::Wire *group_active = module->addWire(NEW_ID, 1);
 				module->addReduceOr(NEW_ID, group_s, group_active, false, src);
 
+				//匿名函数3 重构原来两个pmux结构
 				auto rebuild_pmux = [&](RTLIL::Cell *cell, const RTLIL::SigSpec &pair_data) {
 					RTLIL::SigSpec old_b = cell->getPort(ID::B);
 					RTLIL::SigSpec old_s = cell->getPort(ID::S);
@@ -337,6 +410,8 @@ struct PmuxOptPass : public Pass
 					cell->setParam(ID::S_WIDTH, GetSize(new_s));
 				};
 
+				//把共享pmux输出的上半段输出交给原pmux，下半段给最佳匹配pmux
+				//如果没有残余未配对通道的话，相当于删除原来两个pmux
 				rebuild_pmux(cell_a, RTLIL::SigSpec(pair_final).extract(0, width));
 				rebuild_pmux(best_b, RTLIL::SigSpec(pair_final).extract(width, width));
 				used.insert(cell_a);
@@ -348,10 +423,10 @@ struct PmuxOptPass : public Pass
 						log_id(module), log_id(cell_a), log_id(best_b), GetSize(group_pairs), GetSize(best_pairs), partial);
 			}
 		}
-
 		return changes;
 	}
 
+	//P2入口，优先选择链重组
 	static int run_priority_balance_rule(RTLIL::Design *design, bool verbose)
 	{
 		int changes = 0;
